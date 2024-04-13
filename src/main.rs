@@ -18,7 +18,7 @@ async fn convert_text_handler(text_schema: web::Json<models::TextSchema>) -> imp
     let to_result = layouts::LayoutCode::from_str(&text_schema.to);
 
     if let (Ok(from), Ok(to)) = (from_result, to_result) {
-        let converted_text = layouts::convert_text(text_schema.text.clone(), from, to);
+        let converted_text = layouts::parallel_convert_text(text_schema.text.clone(), from, to);
         HttpResponse::Ok().json(serde_json::json!({"status": "success", "data": converted_text}))
     } else {
         HttpResponse::BadRequest().json(

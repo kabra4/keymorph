@@ -1,3 +1,4 @@
+use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -6,6 +7,7 @@ pub enum LayoutCode {
     Dvorak,
     Qwerty,
     Colemak,
+    Russian,
 }
 
 impl FromStr for LayoutCode {
@@ -16,19 +18,28 @@ impl FromStr for LayoutCode {
             "dvorak" => Ok(LayoutCode::Dvorak),
             "qwerty" => Ok(LayoutCode::Qwerty),
             "colemak" => Ok(LayoutCode::Colemak),
+            "russian" => Ok(LayoutCode::Russian),
             _ => Err(()),
         }
     }
 }
 
+lazy_static! {
+    static ref KEYMAPS: HashMap<(LayoutCode, LayoutCode), HashMap<char, char>> = create_keymaps();
+}
+
 fn create_keymaps() -> HashMap<(LayoutCode, LayoutCode), HashMap<char, char>> {
     let mut keymaps = HashMap::new();
 
-    let qwerty_to_dvorak = qwerty_to_dvorak();
-    let qwerty_to_colemak = qwerty_to_colemak();
-
-    keymaps.insert((LayoutCode::Qwerty, LayoutCode::Dvorak), qwerty_to_dvorak);
-    keymaps.insert((LayoutCode::Qwerty, LayoutCode::Colemak), qwerty_to_colemak);
+    keymaps.insert((LayoutCode::Qwerty, LayoutCode::Dvorak), qwerty_to_dvorak());
+    keymaps.insert(
+        (LayoutCode::Qwerty, LayoutCode::Colemak),
+        qwerty_to_colemak(),
+    );
+    keymaps.insert(
+        (LayoutCode::Qwerty, LayoutCode::Russian),
+        qwerty_to_russian(),
+    );
 
     generate_inverse_maps(&mut keymaps);
 
@@ -39,7 +50,8 @@ fn create_keymaps() -> HashMap<(LayoutCode, LayoutCode), HashMap<char, char>> {
 
 // Generates inverse maps for all direct maps to/from Qwerty
 fn generate_inverse_maps(keymaps: &mut HashMap<(LayoutCode, LayoutCode), HashMap<char, char>>) {
-    let layouts = vec![LayoutCode::Dvorak, LayoutCode::Colemak];
+    let layouts = vec![LayoutCode::Dvorak, LayoutCode::Colemak, LayoutCode::Russian];
+
     for &layout in &layouts {
         if let Some(map) = keymaps.get(&(LayoutCode::Qwerty, layout)) {
             let inverse_map = invert_map(map);
@@ -50,7 +62,7 @@ fn generate_inverse_maps(keymaps: &mut HashMap<(LayoutCode, LayoutCode), HashMap
 
 // Function to generate composite maps between all layouts via Qwerty
 fn generate_composite_maps(keymaps: &mut HashMap<(LayoutCode, LayoutCode), HashMap<char, char>>) {
-    let layouts = vec![LayoutCode::Dvorak, LayoutCode::Colemak];
+    let layouts = vec![LayoutCode::Dvorak, LayoutCode::Colemak, LayoutCode::Russian];
     for &from in &layouts {
         for &to in &layouts {
             if from != to {
@@ -76,16 +88,43 @@ fn combine_maps(first: &HashMap<char, char>, second: &HashMap<char, char>) -> Ha
         .collect()
 }
 
-fn convertion_map(from: LayoutCode, to: LayoutCode) -> HashMap<char, char> {
-    let keymaps = create_keymaps();
-    keymaps.get(&(from, to)).unwrap().clone()
+pub fn convert_text(text: String, from: LayoutCode, to: LayoutCode) -> String {
+    if let Some(map) = KEYMAPS.get(&(from, to)) {
+        text.chars()
+            .map(|c| map.get(&c).copied().unwrap_or(c)) // Safe because `unwrap_or` provides a default
+            .collect()
+    } else {
+        // Log the error or handle the case when map is not found
+        eprintln!("Error: No conversion map found for {:?} to {:?}", from, to);
+        text // Optionally, return the original text or a specific error message
+    }
 }
 
-pub fn convert_text(text: String, from: LayoutCode, to: LayoutCode) -> String {
-    let map = convertion_map(from, to);
-    text.chars()
-        .map(|c| map.get(&c).copied().unwrap_or(c))
-        .collect()
+pub fn parallel_convert_text(text: String, from: LayoutCode, to: LayoutCode) -> String {
+    const THRESHOLD: usize = 1000;
+    const MAX_THREADS: usize = 4;
+    if text.len() > THRESHOLD {
+        let chunk_size = text.len() / MAX_THREADS;
+        let chunks: Vec<String> = text
+            .chars()
+            .collect::<Vec<char>>()
+            .chunks(chunk_size)
+            .map(|chunk| chunk.iter().collect())
+            .collect();
+        let mut converted_chunks = Vec::new();
+        for chunk in chunks {
+            let from = from;
+            let to = to;
+            let handle = std::thread::spawn(move || convert_text(chunk, from, to));
+            converted_chunks.push(handle);
+        }
+        converted_chunks
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect()
+    } else {
+        convert_text(text, from, to)
+    }
 }
 
 fn qwerty_to_dvorak() -> HashMap<char, char> {
@@ -201,5 +240,77 @@ fn qwerty_to_colemak() -> HashMap<char, char> {
     map.insert(':', 'P');
     map.insert('"', '_');
     map.insert('_', '"');
+    map
+}
+
+fn qwerty_to_russian() -> HashMap<char, char> {
+    let mut map = HashMap::new();
+    map.insert('q', 'й');
+    map.insert('w', 'ц');
+    map.insert('e', 'у');
+    map.insert('r', 'к');
+    map.insert('t', 'е');
+    map.insert('y', 'н');
+    map.insert('u', 'г');
+    map.insert('i', 'ш');
+    map.insert('o', 'щ');
+    map.insert('p', 'з');
+    map.insert('[', 'х');
+    map.insert(']', 'ъ');
+    map.insert('a', 'ф');
+    map.insert('s', 'ы');
+    map.insert('d', 'в');
+    map.insert('f', 'а');
+    map.insert('g', 'п');
+    map.insert('h', 'р');
+    map.insert('j', 'о');
+    map.insert('k', 'л');
+    map.insert('l', 'д');
+    map.insert(';', 'ж');
+    map.insert('\'', 'э');
+    map.insert('z', 'я');
+    map.insert('x', 'ч');
+    map.insert('c', 'с');
+    map.insert('v', 'м');
+    map.insert('b', 'и');
+    map.insert('n', 'т');
+    map.insert('m', 'ь');
+    map.insert(',', 'б');
+    map.insert('.', 'ю');
+    map.insert('/', '.');
+    // capital letters
+    map.insert('Q', 'Й');
+    map.insert('W', 'Ц');
+    map.insert('E', 'У');
+    map.insert('R', 'К');
+    map.insert('T', 'Е');
+    map.insert('Y', 'Н');
+    map.insert('U', 'Г');
+    map.insert('I', 'Ш');
+    map.insert('O', 'Щ');
+    map.insert('P', 'З');
+    map.insert('{', 'Х');
+    map.insert('}', 'Ъ');
+    map.insert('A', 'Ф');
+    map.insert('S', 'Ы');
+    map.insert('D', 'В');
+    map.insert('F', 'А');
+    map.insert('G', 'П');
+    map.insert('H', 'Р');
+    map.insert('J', 'О');
+    map.insert('K', 'Л');
+    map.insert('L', 'Д');
+    map.insert(':', 'Ж');
+    map.insert('"', 'Э');
+    map.insert('Z', 'Я');
+    map.insert('X', 'Ч');
+    map.insert('C', 'С');
+    map.insert('V', 'М');
+    map.insert('B', 'И');
+    map.insert('N', 'Т');
+    map.insert('M', 'Ь');
+    map.insert('<', 'Б');
+    map.insert('>', 'Ю');
+    map.insert('?', ',');
     map
 }
